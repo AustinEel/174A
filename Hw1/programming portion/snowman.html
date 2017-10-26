@@ -1,0 +1,51 @@
+let model_transform = Mat4.scale( Vec.of( 3,3,3 ) );                                                                            // Initially zoom the whole world in
+      
+this.shapes.box.draw( graphics_state, model_transform.times( Mat4.scale([ 15,1,15 ]) ), this.green );                           // Ground plane.  It will be our root node.
+
+model_transform = model_transform.times( Mat4.translation( Vec.of( 0,2,0 ) ) );                                                 // Travel to top of ground plus one ball radius
+
+for( let i = 0; i < 4; i++ )                                                                                                    // Loop through snowman body segments, from the bottom
+{ this.shapes.ball.draw( graphics_state, model_transform, this.white );                                                         // Draw thorax / abdomen snowballs
+
+  for( let i of [ -1,1 ] )
+    this.draw_arms( graphics_state, model_transform.times( Mat4.scale( Vec.of( i,1,1 ) ) )  );              // Using scale(-1 or 1), reflect arms for both sides of the snowman
+  
+  model_transform = model_transform.times( Mat4.translation( Vec.of( 0,1.5,0 ) ) );                         // Proceed to next snowman ball location and size
+  model_transform = model_transform.times( Mat4.scale( Vec.of( .5,.5,.5 ) ) );
+}
+
+this.shapes.ball.draw( graphics_state, model_transform, this.white );                                       // Head           
+let nose = model_transform.times( Mat4.translation( Vec.of( 0,0,1+4 ) ) );
+nose = nose.times( Mat4.scale( Vec.of( .2,.2,4 ) ) );
+this.shapes.box.draw( graphics_state, nose, this.orange );                                                  // Nose
+
+
+draw_arms( graphics_state, model_transform )
+{ for( let i of [ -1, 0, 1, ] )                                                                     // For three possible up-down arm orientations,
+{ let current_arm = model_transform.times( Mat4.rotation( i * Math.PI/6, Vec.of( 0, 0,1 ) ) )       // Calculate the current orientation 
+                                   .times( Mat4.rotation( Math.PI/4,     Vec.of( 0,-1,0 ) ) )
+                                   .times( Mat4.translation( Vec.of( 1,0,0 ) ) );                   // Travel to the correct point on the ball's surface
+  
+  let arm_rotation =  Mat4.rotation( Math.PI/12 * (Math.sin( this.t ) - 1), Vec.of( 0,1,0 ) );
+  
+  current_arm = current_arm.times( arm_rotation );                                                  // Draw where the hinge edge exixts on the ball surface.  Rotate there.
+  this.shapes.ball.draw( graphics_state, current_arm.times( Mat4.scale([ .01, .01, .01 ]) ), this.red ); 
+  
+  
+  
+  current_arm = current_arm.times( Mat4.scale([ .5,.05,.05 ]) );                                    // Scale to the arm's dimensions and translate down the stretched system
+  current_arm = current_arm.times( Mat4.translation( Vec.of( 1,0,-1 ) ) );        
+  this.shapes.box.draw( graphics_state, current_arm, this.yellow );                                 // First arm segment is done now; draw it.
+  
+  current_arm = current_arm.times( Mat4.translation( Vec.of( 1,0,1 ) ) );                           // Continue to the next hinge edge: the front outer edge of the arm
+  
+  current_arm = current_arm.times( Mat4.scale([ 1/.5,1/.05,1/.05 ]) );                              // Undo our stretched coordinate system before we rotate
+  
+  this.shapes.ball.draw( graphics_state, current_arm.times( Mat4.scale([ .01, .01, .01 ]) ), this.red );    // Draw where the hinge exists on the elbow.  Rotate there.  
+  current_arm = current_arm.times( arm_rotation );
+  
+  current_arm = current_arm.times( Mat4.scale([ .5,.05,.05 ]) )                                     // Scale to the arm's dimensions and translate down the stretched system
+  current_arm = current_arm.times( Mat4.translation( Vec.of( 1,0,-1 ) ) );        
+  this.shapes.box.draw( graphics_state, current_arm, this.yellow );                                 // Second arm segment is done now; draw it.
+}
+}
