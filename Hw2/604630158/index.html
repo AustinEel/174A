@@ -1,0 +1,414 @@
+<!-- Graphics Example Code.  index.html - The web page document containing the canvas (drawing surface), that launches your javascript files.  By Garett //-->
+<!DOCTYPE html> <html> <head> <meta charset="UTF-8"/> <link rel="icon" href="assets/fav.ico">
+<script type="text/javascript" src="tinywebgl-ucla.js" ></script>  <!--  Javascript "include" files.  Any code in them gets executed as part of the page loading. //-->
+<script type="text/javascript" src="dependencies.js"   ></script>
+<script type="text/javascript"> "use strict"    
+  window.onload = function init()        // ********************* THE ENTRY POINT OF THE WHOLE PROGRAM STARTS HERE ********************* 
+    { window.contexts = {};                                                            // A global variable, "contexts".  Browsers support up to 16 WebGL contexts per page.
+      
+      const scenes  = [ "Tutorial_Animation", "Movement_Controls", "Global_Info_Table" ]; // Register some scenes to the "Canvas_Manager" object -- which WebGL calls
+                                                                                       // upon every time a draw / keyboard / mouse event happens.  
+      
+      if( eval( "typeof " + scenes[0] ) !== "undefined" )
+      { document.getElementById( "canvases" ).appendChild( Object.assign( document.createElement( "canvas" ), { id: "main_canvas", width: 800, height: 600 } ) );
+        contexts[ "main_canvas" ] = new Canvas_Manager( "main_canvas", Color.of( 0,0,0,1 ), scenes );   // Manage the WebGL canvas.  Second parameter sets background color.
+        for( let c in contexts ) contexts[ c ].render();     // Call render() for each WebGL context on this page.  Then render() will re-queue itself for more calls.
+        
+        Code_Manager.display_code( eval( scenes[0] ) );                                  // Display the code for our demo on the page, starting with the first scene in the list.
+        for( let list of [ core_dependencies, all_dependencies ] )
+        document.querySelector( "#class_list" ).rows[2].appendChild( Object.assign( document.createElement( "td" ), { 
+          innerHTML: list.reduce( (acc, x) => acc += "<a href='javascript:void(0);' onclick='Code_Manager.display_code(" + x + ")'>" + x + "</a><br>", "" ) } ) );        
+        document.getElementsByName( "main_demo_link" )[0].innerHTML = "<a href='javascript:void(0);' onclick='Code_Manager.display_code(" + scenes[0] + ")'>" + scenes[0] + "</a><br>";
+        document.querySelector("#code_display").innerHTML = "Below is the code for the demo that's running:<br>&nbsp;<br>" + document.querySelector("#code_display").innerHTML;             
+      }
+      
+      document.querySelector("#edit_button").addEventListener('click', () => {
+        code_panel.style.display=class_list.style.display='none'; new_demo_source_code.style.display='block'; 
+        document.getElementsByName( 'new_demo_code' )[0].value=code_display.dataset.displayed.toString() } )
+      const form = document.forms.namedItem("new_demo_source_code");
+      form.addEventListener('submit', function(event) 
+        { if( document.getElementsByName( "finished" )[0].checked )
+            alert( "Your demo will be submitted.  If approved, you will start being asked for a password to make any further updates to it.  This password "
+                 + "will appear right now, below the submit button, and then (assuming submission worked) it will never appear again.  Write it down." );
+          var xhr = new XMLHttpRequest();
+          xhr.open("POST", "/submit-demo?Unapproved", true);
+          xhr.responseType = "json";
+          xhr.onload = function(event) 
+          { if (xhr.status != 200) { document.querySelector("#submit_result").textContent = "Error " + xhr.status + " when trying to upload."; return }
+            document.querySelector("#submit_result").textContent = this.response.message;
+            // if( this.response.hide_finished_checkbox ) { document.getElementsByName( "finished" )[0].checked = false; expert_panel.style.display = "none" }
+            if( this.response.show_password  ) document.getElementsByName( "password" )[0] .style.display = "inline";
+            if( this.response.show_overwrite ) document.querySelector( "#overwrite_panel" ).style.display = "inline";
+          };
+          xhr.setRequestHeader("Content-Type", "application/json");
+          xhr.send( JSON.stringify( Array.from( form.elements ).reduce( ( accum, elem ) => 
+            { if( elem.value && !( ['checkbox', 'radio'].includes(elem.type) && !elem.checked ) ) accum[elem.name] = elem.value; return accum }, {} ) ) );
+          event.preventDefault();
+        }, false);      
+    }
+
+// Below is the demo you will see when you run the program!    
+  
+class Tutorial_Animation extends Scene_Component  // An example of a Scene_Component that our class Canvas_Manager can manage.  Like most, this one draws 3D shapes.
+{ constructor( context )
+    { super( context );
+      var global_transform1 = Mat4.identity();
+      var global_transform2 = Mat4.identity();
+      var shapes = { 'triangle'        : new Triangle(),                            // At the beginning of our program, instantiate all shapes we plan to use,
+                     'strip'           : new Square(),                              // each with only one instance in the graphics card's memory.
+                     'bad_tetrahedron' : new Tetrahedron( false ),                  // For example we would only create one "cube" blueprint in the GPU, but then 
+                     'tetrahedron'     : new Tetrahedron( true ),
+                     'box' :   new Cube(),                            // Load one of each of these shape definitions onto the GPU.  Once each Shape is there we 
+                     'ball':   new Subdivision_Sphere( 4 ) ,        // re-use it many times per display() call to get multiple of that shape to appear in the scene.                   // re-use it many times per call to display to get multiple cubes in the scene.
+                     'windmill'        : new Windmill( 10 ),
+                     'tube'        : new Cylindrical_Tube  ( 10, 10, [[0,1],[0,1]] ), 
+                     'jewel'       : new Jewel (10, 50, [[0,1],[0,1]]),
+                     'capped'      : new Capped_Cylinder   ( 4, 12, [[0,1],[0,1]] ),                     // Cylinder.  Also useful.;
+                     'pyramid'     : new Pyramid () }
+      this.submit_shapes( context, shapes );
+      
+       // Place the camera, which is stored in a scratchpad for globals.  Secondly, setup the projection:  The matrix that determines how depth is treated.  It projects 3D points onto a plane.
+      Object.assign( context.globals.graphics_state, { camera_transform: Mat4.translation([ 0, 0,-25 ]), projection_transform: Mat4.perspective( Math.PI/4, context.width/context.height, .1, 1000 ) } );
+      
+      // *** Materials: *** Declare new ones as temps when needed; they're just cheap wrappers for some numbers.  1st parameter:  Color (4 floats in RGBA format),
+      // 2nd: Ambient light, 3rd: Diffuse reflectivity, 4th: Specular reflectivity, 5th: Smoothness exponent, 6th: Optional texture object, leave off for un-textured.
+      Object.assign( this, { purplePlastic: context.get_instance( Phong_Model  ).material( Color.of( .9,.5,.9, 1 ), .4, .4, .8, 40 ),
+                             greyPlastic  : context.get_instance( Phong_Model  ).material( Color.of( .5,.5,.5, 1 ), .4, .8, .4, 20 ),   // Smaller exponent means 
+                             blueGlass    : context.get_instance( Phong_Model  ).material( Color.of( .5,.5, 1,.2 ), .4, .8, .4, 40 ),   // a bigger shiny spot.
+                             fire         : context.get_instance( Funny_Shader ).material(),
+                             stars        : context.get_instance( Phong_Model  ).material( Color.of( 0,0,1,1 ), .5, .5, .5, 40, context.get_instance( "assets/stars.png" ) ),
+                             stone        : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), .5, .5, .5, 100, context.get_instance( "assets/stone.jpg" ) ),
+                             sky        : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), .5, .5, .5, 100, context.get_instance( "assets/sky.jpg" ) ),
+                             sand        : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), .5, .5, .5, 100, context.get_instance( "assets/sand.jpeg" ) ),
+                             grass        : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), .5, .5, .5, 100, context.get_instance( "assets/grass.jpg" ) ),
+                             hats        : context.get_instance( Phong_Model  ).material( Color.of( 0,0,0,1 ), .5, .5, .5, 100, context.get_instance( "assets/hats.jpg" ) ),
+                             yellow: context.get_instance( Phong_Model ).material( Color.of( .8, .8, .3,  1 ), .2, 1, .7, 40 ),  // Call material() on the Phong_Shader,
+                             brown:  context.get_instance( Phong_Model ).material( Color.of( .3, .3, .1,  1 ), .2, 1,  1, 40 ),  // which returns a special-made "material" 
+                             red:    context.get_instance( Phong_Model ).material( Color.of(  1,  0,  0, .9 ), .1, .7, 1, 40 ),  // (a JavaScript object)
+                             green:  context.get_instance( Phong_Model ).material( Color.of(  0, .5,  0,  1 ), .1, .7, 1, 40 ),
+                             blue:   context.get_instance( Phong_Model ).material( Color.of(  0,  0,  1, 1 ), .1, .7, 1, 40 ),
+                             silver: context.get_instance( Phong_Model ).material( Color.of( .8, .8, .8,  1 ),  0,  1, 1, 40 ) } );                            
+      }
+
+  draw_legs( graphics_state, model_transform, t) {
+
+
+      let leg1_rotation =  Mat4.rotation( Math.PI/4 * -((Math.sin(4*t))), Vec.of( 0,0,1) ); //multiply just the sin to change movement speed
+      let leg2_rotation =  Mat4.rotation( Math.PI/4 * ((Math.sin(4*t))), Vec.of( 0,0,1) ); //multiply just the sin to change movement speed
+      if ( t >= 15 && t < 20) {
+      let leg1 = model_transform.times( Mat4.translation([ 0, -8, 1 ]) ); //move leg1 pt1 into position;
+
+      let leg2 = model_transform.times( Mat4.translation([ 0,-8,-1 ]) );
+
+      leg1 = leg1.times( Mat4.scale([1, 4, 1 ]));
+      this.shapes.box.draw( graphics_state, leg1, this.brown );
+
+      // let leg2 = model_transform.times( Mat4.translation([ 0,-2.25,1.5 ]) );
+      leg2 = leg2.times( Mat4.scale([1, 4, 1 ]));
+      this.shapes.box.draw( graphics_state, leg2, this.brown );
+      } else if (t >=20 && t < 40) {
+      let leg1 = model_transform.times( Mat4.translation([ 0, -8, 1 ]) ); //move leg1 pt1 into position;
+
+      let leg2 = model_transform.times( Mat4.translation([ 0,-8,-1 ]) );
+
+      leg1 = leg1.times( Mat4.scale([1, 4, 1 ]));
+      this.shapes.box.draw( graphics_state, leg1, this.brown );
+
+      // let leg2 = model_transform.times( Mat4.translation([ 0,-2.25,1.5 ]) );
+      leg2 = leg2.times( Mat4.scale([1, 4, 1 ]));
+      this.shapes.box.draw( graphics_state, leg2, this.brown );
+      } else {
+        let leg1 = model_transform.times( Mat4.translation([ 0, -8, 1 ]) ); //move leg1 pt1 into position;
+      leg1 = leg1.times(Mat4.translation([ 0, 4, 0])); //move origin to the hinge
+      leg1 = leg1.times(leg1_rotation); //animate the rotation of legs
+      leg1 = leg1.times(Mat4.translation([0,-4,0])); //move the origin back so we can display the leg correctly
+
+      let leg2 = model_transform.times( Mat4.translation([ 0,-8,-1 ]) );
+      leg2 = leg2.times(Mat4.translation([ 0, 4, 0])); //move origin to the hinge
+      leg2 = leg2.times(leg2_rotation); //animate the rotation of legs
+      leg2 = leg2.times(Mat4.translation([0,-4,0])); //move the origin back so we can display the leg correctly
+
+      leg1 = leg1.times( Mat4.scale([1, 4, 1 ]));
+      this.shapes.box.draw( graphics_state, leg1, this.brown );
+
+      // let leg2 = model_transform.times( Mat4.translation([ 0,-2.25,1.5 ]) );
+      leg2 = leg2.times( Mat4.scale([1, 4, 1 ]));
+      this.shapes.box.draw( graphics_state, leg2, this.brown );
+      }
+  }
+
+  draw_arms( graphics_state, model_transform, t) {
+    let arm1_rotation =  Mat4.rotation( Math.PI/4 * ((Math.sin(4*t))), Vec.of( 0,0,1) ); //multiply just the sin to change movement speed
+    let arm2_rotation =  Mat4.rotation( Math.PI/4 * -((Math.sin(4*t))), Vec.of( 0,0,1) ); //multiply just the sin to change movement speed
+
+    if ( t >= 15 && t < 20) {
+    let arm1 = model_transform.times( Mat4.translation([0, 0, 3]));
+
+    let arm2 = model_transform.times( Mat4.translation([0, 0, -3]));
+
+    arm1 = arm1.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm1, this.blue );
+    this.draw_staff(graphics_state, arm1);
+
+    arm2 = arm2.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm2, this.blue );
+    } else if (t >=20 && t < 40) {
+    let arm1 = model_transform.times( Mat4.translation([0, 0, 3]));
+    arm1 = arm1.times(Mat4.translation([ 0, 4, 0])); //move origin to the hinge
+    arm1 = arm1.times(Mat4.rotation(Math.PI/2, Vec.of(0,0,1))); //animate the rotation of legs
+    arm1 = arm1.times(Mat4.translation([0,-4,0])); //move the origin back so we can display the leg correctly
+
+    let arm2 = model_transform.times( Mat4.translation([0, 0, -3]));
+
+    arm1 = arm1.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm1, this.blue );
+    this.draw_staff(graphics_state, arm1);
+
+    arm2 = arm2.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm2, this.blue );
+    } else {
+    let arm1 = model_transform.times( Mat4.translation([0, 0, 3]));
+    arm1 = arm1.times(Mat4.translation([ 0, 4, 0])); //move origin to the hinge
+    arm1 = arm1.times(arm1_rotation); //animate the rotation of legs
+    arm1 = arm1.times(Mat4.translation([0,-4,0])); //move the origin back so we can display the leg correctly
+
+    let arm2 = model_transform.times( Mat4.translation([0, 0, -3]));
+    arm2 = arm2.times(Mat4.translation([ 0, 4, 0])); //move origin to the hinge
+    arm2 = arm2.times(arm2_rotation); //animate the rotation of legs
+    arm2 = arm2.times(Mat4.translation([0,-4,0])); //move the origin back so we can display the leg correctly
+
+    arm1 = arm1.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm1, this.blue );
+    this.draw_staff(graphics_state, arm1);
+
+    arm2 = arm2.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm2, this.blue );
+    }
+  }
+
+  draw_arms2( graphics_state, model_transform, t) {
+    let arm1_rotation =  Mat4.rotation( Math.PI/4 * ((Math.sin(4*t))), Vec.of( 0,0,1) ); //multiply just the sin to change movement speed
+    let arm2_rotation =  Mat4.rotation( Math.PI/4 * -((Math.sin(4*t))), Vec.of( 0,0,1) ); //multiply just the sin to change movement speed
+
+    if ( t >= 15 && t < 20) {
+    let arm1 = model_transform.times( Mat4.translation([0, 0, 3]));
+
+    let arm2 = model_transform.times( Mat4.translation([0, 0, -3]));
+
+    arm1 = arm1.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm1, this.red );
+    this.draw_staff(graphics_state, arm1);
+
+    arm2 = arm2.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm2, this.red );
+    } else if (t >=20 && t < 40) {
+    let arm1 = model_transform.times( Mat4.translation([0, 0, 3]));
+
+    let arm2 = model_transform.times( Mat4.translation([0, 0, -3]));
+
+    arm1 = arm1.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm1, this.red );
+    this.draw_staff(graphics_state, arm1);
+
+    arm2 = arm2.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm2, this.red );
+    } else {
+    let arm1 = model_transform.times( Mat4.translation([0, 0, 3]));
+    arm1 = arm1.times(Mat4.translation([ 0, 4, 0])); //move origin to the hinge
+    arm1 = arm1.times(arm1_rotation); //animate the rotation of legs
+    arm1 = arm1.times(Mat4.translation([0,-4,0])); //move the origin back so we can display the leg correctly
+
+    let arm2 = model_transform.times( Mat4.translation([0, 0, -3]));
+    arm2 = arm2.times(Mat4.translation([ 0, 4, 0])); //move origin to the hinge
+    arm2 = arm2.times(arm2_rotation); //animate the rotation of legs
+    arm2 = arm2.times(Mat4.translation([0,-4,0])); //move the origin back so we can display the leg correctly
+
+    arm1 = arm1.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm1, this.red );
+    this.draw_staff(graphics_state, arm1);
+
+    arm2 = arm2.times( Mat4.scale([1, 4, 1 ]));
+    this.shapes.box.draw( graphics_state, arm2, this.red );
+    }
+  }
+
+  draw_body(graphics_state, model_transform) {
+    let body = model_transform.times( Mat4.scale([ 1,4,2 ]) );
+    // body = body.times(Mat4.translation([ 0, -5, 0]));
+    this.shapes.box.draw( graphics_state, body, this.yellow );
+  }
+
+  draw_head(graphics_state, model_transform) {
+    let head = model_transform;
+    head = head.times(Mat4.translation([0,5.5,0])).times(Mat4.scale([1.5, 1.5, 1.5]));
+    this.shapes.ball.draw(graphics_state, head, this.brown);
+    let hat = head;
+    hat = hat.times(Mat4.translation([0, 1.5, 0]));
+    hat = hat.times(Mat4.rotation(Math.PI/-2, Vec.of(1, 0, 0)));
+    this.shapes.jewel.draw(graphics_state, hat, this.stars); 
+  }
+
+  draw_person(graphics_state, model_transform, t) {
+    let person_matrix = model_transform.times(Mat4.translation([0, -8, 0]));
+    this.draw_body(graphics_state, person_matrix);
+    this.draw_legs(graphics_state, person_matrix, t);
+    this.draw_arms(graphics_state, person_matrix, t);
+    this.draw_head(graphics_state, person_matrix);
+  }
+
+  draw_person2(graphics_state, model_transform, t) {
+    if (t >= 20 && t < 40) {
+    model_transform = model_transform.times(Mat4.translation([200, 0, 0])).times(Mat4.scale([-1, 1, 1]));
+    let person_matrix = model_transform.times(Mat4.translation([0, -8, 0]));
+    person_matrix = person_matrix.times(Mat4.rotation((1/(Math.PI/2)) * 5 * t, Vec.of(0,0,1) ));
+    this.draw_body(graphics_state, person_matrix);
+    this.draw_legs(graphics_state, person_matrix, t);
+    this.draw_arms2(graphics_state, person_matrix, t);
+    this.draw_head(graphics_state, person_matrix);
+    } else {
+    model_transform = model_transform.times(Mat4.translation([200, 0, 0])).times(Mat4.scale([-1, 1, 1]));
+    let person_matrix = model_transform.times(Mat4.translation([0, -8, 0]));
+    this.draw_body(graphics_state, person_matrix);
+    this.draw_legs(graphics_state, person_matrix, t);
+    this.draw_arms2(graphics_state, person_matrix, t);
+    this.draw_head(graphics_state, person_matrix);
+    }
+
+  }
+
+  draw_staff(graphics_state, model_transform) {
+    model_transform = model_transform.times(Mat4.rotation((Math.PI/2), Vec.of(0,1,0)));
+    model_transform = model_transform.times(Mat4.translation([0, -1, 2]));
+    model_transform = model_transform.times(Mat4.scale([ .5, .125, 13 ]));
+    this.shapes.capped.draw(graphics_state, model_transform, this.stone);
+
+  }
+
+  display( graphics_state )
+    { var model_transform = Mat4.identity();             // We begin with a brand new model_transform every frame.
+
+      var body2 = Mat4.identity();
+
+      var t = graphics_state.animation_time/1000,   tilt_spin   = Mat4.rotation( 12*t, Vec.of(          .1,          .8,             .1 ) ),
+                                                    funny_orbit = Mat4.rotation(  2*t, Vec.of( Math.cos(t), Math.sin(t), .7*Math.cos(t) ) );
+      this.shapes.box.draw( graphics_state, model_transform.times(Mat4.scale([ 2000,.1,2000 ]).times((Mat4.translation([ 0, -200, 0 ])))), this.stone );                           // Ground plane.  
+      this.shapes.box.draw( graphics_state, model_transform.times(Mat4.scale([ 2000,2000,.1]).times((Mat4.translation([ 0, .5, -5000 ])))), this.sky );  
+      this.shapes.box.draw( graphics_state, model_transform.times(Mat4.scale([ .1,2000,2000]).times((Mat4.translation([ -5000, .5, 0 ])))), this.sky );                         
+      this.shapes.box.draw( graphics_state, model_transform.times(Mat4.scale([ .1,2000,2000]).times((Mat4.translation([ 5000, .5, 0 ])))), this.sky );                                                
+      // *** Lights: *** Values of vector or point lights over time.  Two different lights *per shape* supported by Phong_Shader; more requires changing a number in the vertex 
+      graphics_state.lights = [ new Light( Vec.of(  3,  30,  50, 1 ), Color.of( 1, 1, 1, 1 ), 1000000000 ),      // shader.  Arguments to construct a Light(): Light source position
+                                new Light( Vec.of(  4*t,  3,  0, 1 ), Color.of( 1, 1, 1, 1 ), 100000 ) ];    // or vector (homogeneous coordinates), color, and size.  
+      
+      
+      
+      // SCENE 1
+      if (t < 2) {
+        
+      } else if (t >=2 && t < 7) {
+      model_transform = model_transform.times(Mat4.translation(([6*t, 0, 0])));
+      this.global_transform1 = model_transform;
+      this.draw_person(graphics_state, model_transform, t);
+      // model_transform = model_transform.times(Mat4.translation([4*t, 0, 0]));
+      body2 = body2.times(Mat4.translation(([-6*t, 0, 0])));
+      this.global_transform2 = body2;
+      this.draw_person2(graphics_state, body2, t);               
+      var looker = Mat4.look_at( Vec.of( 6*t,0,50 ), Vec.of( 6*t,0,0 ), Vec.of( 0,1,0 ) ); //eye at up
+      graphics_state.camera_transform = looker;
+      } else if ( t >= 7 && t < 15) {
+      model_transform = model_transform.times(Mat4.translation(([4*t, 0, 0])));
+      this.global_transform1 = model_transform;
+      this.draw_person(graphics_state, model_transform, t);
+      // model_transform = model_transform.times(Mat4.translation([4*t, 0, 0]));
+      body2 = body2.times(Mat4.translation(([-6*t, 0, 0])));
+      this.global_transform2 = body2;
+      this.draw_person2(graphics_state, body2, t);               
+      var looker = Mat4.look_at( Vec.of( 0,0,50 ), Vec.of( 6*t,0,0 ), Vec.of( 0,1,0 ) ); //eye at up
+      graphics_state.camera_transform = looker;
+      } else if ( t >= 15 && t < 20) {
+      // model_transform = model_transform.times(Mat4.translation(([6*t, 0, 0])));
+      this.draw_person(graphics_state, this.global_transform1, t);
+      // body2 = body2.times(Mat4.translation(([-4*t, 0, 0])));
+      this.draw_person2(graphics_state, this.global_transform2, t);
+      // model_transform = model_transform.times(Mat4.translation([4*t, 0, 0]));              
+      var looker = Mat4.look_at( Vec.of( -10,20,0 ), Vec.of( 6*t,0,0 ), Vec.of( 0,1,0 ) ); //eye at up
+      graphics_state.camera_transform = looker;
+      } else if (t >= 20 && t < 40) {
+        this.draw_person(graphics_state, this.global_transform1, t);
+        this.draw_person2(graphics_state, this.global_transform2, t);
+        var looker = Mat4.look_at( Vec.of( 10,20,0 ), Vec.of( 6*t,0,0 ), Vec.of( 0,1,0 ) ); //eye at up
+        graphics_state.camera_transform = looker;
+      }
+
+      // graphics_state.camera_transform = Mat4.look_at(Vec.of(-25, 30, 60 + this.t * 6 * 3), Vec.of(0, 10, this.t * 6 * 3), Vec.of(0, 1, 0));
+ 
+    //   var ground = model_transform;
+    //  ground = ground.times(Mat4.translation([0, 0, 0]));
+    // ground = ground.times(Mat4.scale([1,2,1]));
+    // this.shapes.box.draw(graphics_state, ground, this.blue);
+
+      //////////
+
+
+      // // Many shapes can share influence of the same pair of lights, but they don't have to.  All the following shapes will use these lights instead of the above ones.
+      // graphics_state.lights = [ new Light( tilt_spin.times( Vec.of(  30,  30,  34, 1 ) ), Color.of( 0, .4, 0, 1 ), 100000               ),
+      //                           new Light( tilt_spin.times( Vec.of( -10, -20, -14, 0 ) ), Color.of( 1, 1, .3, 1 ), 100*Math.cos( t/10 ) ) ];
+                                
+      // model_transform.post_multiply( Mat4.translation([ 0, -2, 0 ]) );
+      // this.shapes.tetrahedron    .draw( graphics_state, model_transform.times( funny_orbit ), this.purplePlastic );
+      
+      // model_transform.post_multiply( Mat4.translation([ 0, -2, 0 ]) );
+      // this.shapes.bad_tetrahedron.draw( graphics_state, model_transform.times( funny_orbit ), this.greyPlastic   );
+      
+      // model_transform.post_multiply( Mat4.translation([ 0, -2, 0 ]) );
+      // this.shapes.windmill       .draw( graphics_state, model_transform.times( tilt_spin ),   this.purplePlastic );
+      // model_transform.post_multiply( Mat4.translation([ 0, -2, 0 ]) );
+      // this.shapes.windmill       .draw( graphics_state, model_transform,                      this.fire          );
+      // model_transform.post_multiply( Mat4.translation([ 0, -2, 0 ]) );
+      // this.shapes.windmill       .draw( graphics_state, model_transform,                      this.blueGlass     );
+                     
+
+                     
+
+    }
+}
+</script>
+<style>
+  table { border-collapse: collapse; display:block; overflow-x: auto; }
+  table, th, td { border: 2px solid black; vertical-align: top; white-space: nowrap }
+  th, td { overflow: hidden;  }
+  button { position: relative; background-color: #4C9F50; color: white; padding: 6px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); transition: background-color .3s, transform .3s }
+  button:hover, button:focus { transform: scale(1.2); color:gold }
+  .dropdown { display:inline-block }
+  .dropdown-content { display: none; position: absolute; background-color: #f9f9f9; min-width: 100px; overflow: auto; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2) }
+  .dropdown-content a { color: black; padding: 4px 4px; display: block }
+  .dropdown a:hover { background-color: #f1f1f1 }
+  .show { display:inline-block }
+</style>
+</head><body>
+<div id="explanation_section"></div>
+<div id="canvases"></div>
+<table id="control_buttons" class="dropdown" style="display:block; width: 70%;  border: 0px; margin: 0 0 50px 0"><tr></tr></table>
+<div id="code_panel" style="font-family: monospace; white-space: pre; margin: 50px 0" >
+  <div id="code_display"  data-displayed="" ></div>
+  <button id="edit_button" style="display:none">Start editing</button> 
+  <table id="class_list" class="dropdown" style="display:block; border: 0px; border-spacing: 10px " >
+    <tr><td colspan="2">Click below to navigate through all classes that are defined. <br>&nbsp;<br>Main demo: <span name="main_demo_link"></span></td></tr>
+    <tr style="text-align:center"><td>tinywebgl-ucla.js</td><td>dependencies.js</td></tr><tr></tr></table>
+</div>
+<form name="new_demo_source_code" style="display:none">  
+  <p style="margin: 50px 0"><i><b>What can I put here?</b></i>  A JavaScript class, with any valid JavaScript inside.  Your code can use classes from this demo, or from ANY demo on the 
+  encyclopedia of code --  the dependencies will automatically be pulled in to run your demo!<br></p>
+  <textarea rows="30" cols="140" name="new_demo_code"></textarea><br>
+  <div id="submit_result" style="margin: 10px 0"></div>
+  <button type="submit" style="margin: 0px 50px 0px 0px">Save as new webpage</button> 
+  <input type="text" name="author"   placeholder="Author name">
+  <input type="text" name="password" placeholder="Password" style="display:none">
+  <span id="overwrite_panel" style="display:none"><label>Overwrite?<input type="checkbox" name="overwrite" autocomplete="off"></label></span>
+  <span id="beginner_panel"><label>Beginner Mode<input type="checkbox" checked onchange="document.querySelector('#expert_panel').style.display='block'; beginner_panel.style.display='none'"></label></span>
+  <div id="expert_panel" style="display:none;"><label><input type="checkbox" name="finished" autocomplete="off">
+    Optional:  This demo is finished; consider it for public listing on the main page.  
+    I believe that this demo is the one true way to minimalistically do what its name says.
+    The code's readability and structure are so good as to maximize how easy it is to memorize it.
+    </label></div>  
+</form>
+</body></html>
